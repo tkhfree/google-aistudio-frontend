@@ -1,0 +1,90 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: devices
+    // Fields: id, name, type, x, y, status, config
+    //
+    // Collection: links
+    // Fields: id, source, target, bandwidth, latency
+    //
+    // Collection: flows
+    // Fields: id, name, description, path, code, status, uid, createdAt
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.uid;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         (request.auth.token.email == "mr.zhangmazi@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidDevice(data) {
+      return data.id is string && data.id.size() > 0 && data.id.size() < 100 &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.type in ['switch', 'router', 'controller', 'host'] &&
+             data.x is number && data.y is number &&
+             data.status in ['online', 'offline', 'programming'];
+    }
+
+    function isValidLink(data) {
+      return data.id is string && data.id.size() > 0 && data.id.size() < 100 &&
+             data.source is string && data.target is string &&
+             data.bandwidth is string && data.latency is string;
+    }
+
+    function isValidFlow(data) {
+      return data.id is string && data.id.size() > 0 && data.id.size() < 100 &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.description is string && data.description.size() < 1000 &&
+             data.code is string && data.code.size() < 50000 &&
+             data.status in ['active', 'inactive'] &&
+             data.uid == request.auth.uid;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /devices/{deviceId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /links/{linkId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /flows/{flowId} {
+      allow read: if (isAuthenticated() && (isDocOwner() || isAdmin())) || resource.data.uid == 'guest-user';
+      allow create: if (isAuthenticated() && isValidFlow(request.resource.data)) || request.resource.data.uid == 'guest-user';
+      allow update: if (isAuthenticated() && isDocOwner() && isValidFlow(request.resource.data)) || (resource.data.uid == 'guest-user' && request.resource.data.uid == 'guest-user');
+      allow delete: if (isAuthenticated() && (isDocOwner() || isAdmin())) || resource.data.uid == 'guest-user';
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isAdmin();
+    }
+  }
+}

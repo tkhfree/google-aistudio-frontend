@@ -1,0 +1,5 @@
+{
+  "name": "NetProgrammable: Global Network Topology & Flow Orchestrator",
+  "description": "A platform for building network topologies, analyzing data flows via natural language, and managing programmable device lifecycles.",
+  "requestFramePermissions": []
+}

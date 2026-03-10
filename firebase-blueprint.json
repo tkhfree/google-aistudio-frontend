@@ -1,0 +1,62 @@
+{
+  "entities": {
+    "Device": {
+      "title": "Device",
+      "description": "A network device in the topology",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["switch", "router", "controller", "host"] },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "status": { "type": "string", "enum": ["online", "offline", "programming"] },
+        "config": { "type": "string" }
+      },
+      "required": ["id", "name", "type", "x", "y", "status"]
+    },
+    "Link": {
+      "title": "Link",
+      "description": "A connection between two network devices",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "source": { "type": "string" },
+        "target": { "type": "string" },
+        "bandwidth": { "type": "string" },
+        "latency": { "type": "string" }
+      },
+      "required": ["id", "source", "target", "bandwidth", "latency"]
+    },
+    "Flow": {
+      "title": "Flow",
+      "description": "A programmable network flow rule",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "path": { "type": "array", "items": { "type": "string" } },
+        "code": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "inactive"] },
+        "uid": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "description", "code", "status", "uid"]
+    }
+  },
+  "firestore": {
+    "/devices/{deviceId}": {
+      "schema": "Device",
+      "description": "Collection of network devices"
+    },
+    "/links/{linkId}": {
+      "schema": "Link",
+      "description": "Collection of network links"
+    },
+    "/flows/{flowId}": {
+      "schema": "Flow",
+      "description": "Collection of network flow rules"
+    }
+  }
+}
