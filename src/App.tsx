@@ -3,13 +3,15 @@ import { TopologyCanvas } from './components/TopologyCanvas';
 import { FlowOrchestrator } from './components/FlowOrchestrator';
 import { FlowHistory } from './components/FlowHistory';
 import { DeviceInventory } from './components/DeviceInventory';
+import { DeviceModal } from './components/DeviceModal';
+import { LinkModal } from './components/LinkModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Device, Link, Flow } from './types';
 import { Activity, Layout, Server, Settings, Shield, Zap, LogIn, LogOut, User } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db, handleFirestoreError, OperationType } from './firebase';
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, User as FirebaseUser } from 'firebase/auth';
-import { collection, onSnapshot, doc, setDoc, query, where, orderBy, getDocFromServer } from 'firebase/firestore';
+import { collection, onSnapshot, doc, setDoc, query, where, orderBy, getDocFromServer, deleteDoc } from 'firebase/firestore';
 
 const INITIAL_DEVICES: Device[] = [
   { id: 'c1', name: 'Global Controller', type: 'controller', x: 400, y: 100, status: 'online' },
@@ -35,6 +37,8 @@ export default function App() {
   const [flows, setFlows] = useState<Flow[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const [activeTab, setActiveTab] = useState<'topology' | 'flows' | 'devices'>('topology');
+  const [isDeviceModalOpen, setIsDeviceModalOpen] = useState(false);
+  const [isLinkModalOpen, setIsLinkModalOpen] = useState(false);
 
   // Auth Listener
   useEffect(() => {
@@ -59,49 +63,56 @@ export default function App() {
     testConnection();
   }, []);
 
+  // Bootstrap initial data if needed
+  useEffect(() => {
+    if (!isAuthReady) return;
+    
+    const bootstrap = async () => {
+      // Check if devices collection is empty
+      const devicesSnap = await getDocFromServer(doc(db, 'devices', INITIAL_DEVICES[0].id));
+      if (!devicesSnap.exists()) {
+        for (const d of INITIAL_DEVICES) {
+          await setDoc(doc(db, 'devices', d.id), d);
+        }
+      }
+      
+      // Check if links collection is empty
+      const linksSnap = await getDocFromServer(doc(db, 'links', INITIAL_LINKS[0].id));
+      if (!linksSnap.exists()) {
+        for (const l of INITIAL_LINKS) {
+          await setDoc(doc(db, 'links', l.id), l);
+        }
+      }
+    };
+    
+    bootstrap().catch(console.error);
+  }, [isAuthReady]);
+
   // Sync Devices
   useEffect(() => {
-    if (!isAuthReady || !user) return;
+    if (!isAuthReady) return;
     const path = 'devices';
     const unsubscribe = onSnapshot(collection(db, path), (snapshot) => {
       if (!snapshot.empty) {
         const data = snapshot.docs.map(doc => doc.data() as Device);
         setDevices(data);
-      } else {
-        // Bootstrap initial devices if empty
-        INITIAL_DEVICES.forEach(async (d) => {
-          try {
-            await setDoc(doc(db, path, d.id), d);
-          } catch (e) {
-            console.error('Error bootstrapping device:', e);
-          }
-        });
       }
     }, (error) => handleFirestoreError(error, OperationType.GET, path));
     return () => unsubscribe();
-  }, [isAuthReady, user]);
+  }, [isAuthReady]);
 
   // Sync Links
   useEffect(() => {
-    if (!isAuthReady || !user) return;
+    if (!isAuthReady) return;
     const path = 'links';
     const unsubscribe = onSnapshot(collection(db, path), (snapshot) => {
       if (!snapshot.empty) {
         const data = snapshot.docs.map(doc => doc.data() as Link);
         setLinks(data);
-      } else {
-        // Bootstrap initial links if empty
-        INITIAL_LINKS.forEach(async (l) => {
-          try {
-            await setDoc(doc(db, path, l.id), l);
-          } catch (e) {
-            console.error('Error bootstrapping link:', e);
-          }
-        });
       }
     }, (error) => handleFirestoreError(error, OperationType.GET, path));
     return () => unsubscribe();
-  }, [isAuthReady, user]);
+  }, [isAuthReady]);
 
   // Sync Flows
   useEffect(() => {
@@ -131,6 +142,56 @@ export default function App() {
       await setDoc(doc(db, path, flowWithUid.id), flowWithUid);
     } catch (error) {
       if (user) handleFirestoreError(error, OperationType.CREATE, `${path}/${flowWithUid.id}`);
+    }
+  };
+
+  const handleSaveDevice = async (device: Device) => {
+    const path = 'devices';
+    try {
+      // Remove undefined fields for Firestore
+      const data = JSON.parse(JSON.stringify(device));
+      await setDoc(doc(db, path, device.id), data);
+      setIsDeviceModalOpen(false);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `${path}/${device.id}`);
+    }
+  };
+
+  const handleDeleteDevice = async (id: string) => {
+    const path = 'devices';
+    try {
+      await deleteDoc(doc(db, path, id));
+      // Also delete associated links
+      const linksToDelete = links.filter(l => l.source === id || l.target === id);
+      for (const l of linksToDelete) {
+        await deleteDoc(doc(db, 'links', l.id));
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `${path}/${id}`);
+    }
+  };
+
+  const handleSaveLink = async (link: Link) => {
+    const path = 'links';
+    try {
+      await setDoc(doc(db, path, link.id), link);
+      setIsLinkModalOpen(false);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `${path}/${link.id}`);
+    }
+  };
+
+  const handleNodeDragEnd = async (device: Device) => {
+    const path = 'devices';
+    try {
+      // Create a clean object for Firestore (D3 adds extra props we don't want)
+      const { id, name, type, x, y, status, config } = device;
+      const data: any = { id, name, type, x, y, status };
+      if (config !== undefined) data.config = config;
+      
+      await setDoc(doc(db, path, id), data);
+    } catch (error) {
+      console.error('Error saving node position:', error);
     }
   };
 
@@ -246,7 +307,14 @@ export default function App() {
                 <AnimatePresence mode="wait">
                   {activeTab === 'topology' && (
                     <motion.div key="topology" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full">
-                      <TopologyCanvas devices={devices} links={links} onDeviceClick={setSelectedDevice} />
+                      <TopologyCanvas 
+                        devices={devices} 
+                        links={links} 
+                        onDeviceClick={setSelectedDevice} 
+                        onNodeDragEnd={handleNodeDragEnd}
+                        onAddLinkClick={() => setIsLinkModalOpen(true)}
+                        onAddDeviceClick={() => setIsDeviceModalOpen(true)}
+                      />
                     </motion.div>
                   )}
                   {activeTab === 'flows' && (
@@ -256,7 +324,11 @@ export default function App() {
                   )}
                   {activeTab === 'devices' && (
                     <motion.div key="devices" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full">
-                      <DeviceInventory devices={devices} />
+                      <DeviceInventory 
+                        devices={devices} 
+                        onAddClick={() => setIsDeviceModalOpen(true)}
+                        onDeleteClick={handleDeleteDevice}
+                      />
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -312,6 +384,19 @@ export default function App() {
           </div>
         </main>
       </div>
+
+      <DeviceModal 
+        isOpen={isDeviceModalOpen} 
+        onClose={() => setIsDeviceModalOpen(false)} 
+        onSave={handleSaveDevice} 
+      />
+
+      <LinkModal
+        isOpen={isLinkModalOpen}
+        onClose={() => setIsLinkModalOpen(false)}
+        onSave={handleSaveLink}
+        devices={devices}
+      />
     </ErrorBoundary>
   );
 }

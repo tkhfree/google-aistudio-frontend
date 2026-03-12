@@ -67,12 +67,12 @@ service cloud.firestore {
 
     match /devices/{deviceId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if true;
     }
 
     match /links/{linkId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if true;
     }
 
     match /flows/{flowId} {
